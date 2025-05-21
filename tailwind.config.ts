@@ -1,3 +1,4 @@
+
 import type { Config } from "tailwindcss";
 
 export default {
@@ -61,6 +62,29 @@ export default {
 					'accent-foreground': 'hsl(var(--sidebar-accent-foreground))',
 					border: 'hsl(var(--sidebar-border))',
 					ring: 'hsl(var(--sidebar-ring))'
+				},
+				// Pluralsight colors
+				ps: {
+					'pink': '#ff1675',
+					'blue': {
+						'inky': '#130f25',
+						'light': '#99DAFF',
+						'bright': '#00A3FF',
+					},
+					'purple': '#4a33d1',
+					'violet': '#770ef7',
+					'yellow': '#ffc942',
+					'orange': '#ff7b01',
+					'mint': '#02e088',
+					'dark1': '#1b1834',
+					'dark2': '#242145',
+					'neutral': '#393b6b',
+					'heading': '#585FA2',
+					'disabled': '#8E93C2',
+					'chart': '#89A4C7',
+					'panel': '#d3dff0',
+					'table': '#ebeff5',
+					'bg': '#f4f7fa',
 				}
 			},
 			borderRadius: {
