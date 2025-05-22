@@ -1,5 +1,6 @@
-import { gql } from '@apollo/client';
-import { client } from './graphql';
+import axios from 'axios';
+
+const APIURL = "http://localhost:3001/api/graphql";
 
 interface BulkAssignmentOptions {
     actorPsUserId: string;
@@ -17,30 +18,16 @@ interface User {
     lastName: string;
 }
 
-const ADD_CHANNEL_MEMBERS = gql`
-  mutation AddChannelMembers($input: AddChannelMembersInput!) {
-    addChannelMembers(input: $input) {
-      memberPsUserIds
-      channelId
-      actorPsUserId
-      instructions
-      skipNotificationEmail
-    }
-  }
-`;
+const getHeaders = (apiKey: string) => ({
+    'Authorization': `Bearer ${apiKey}`,
+    'clientversion': 'SSP Automation 1.0',
+    'Content-Type': 'application/json',
+    'Accept': 'application/json'
+});
 
-const ASSIGN_USERS_TO_ROLE = gql`
-  mutation AssignUsersToRole($input: AssignUsersToRoleInput!) {
-    assignUsersToRole(input: $input) {
-      assignedByPsUserId
-      roleId
-      psUserIds
-      message
-    }
-  }
-`;
-
-const USERS_QUERY = gql`query {
+export const fetchUsers = async (apiKey: string): Promise<User[]> => {
+    try {
+        const query = `query {
   users(first: 500) {
     nodes {
       id
@@ -77,21 +64,23 @@ const USERS_QUERY = gql`query {
   }
 }`;
 
-export const fetchUsers = async (): Promise<User[]> => {
-    try {
-        const response = await client.query({
-            query: USERS_QUERY,
-            fetchPolicy: 'network-only',
+        const response = await axios.post(APIURL, { query }, { 
+            headers: getHeaders(apiKey),
+            withCredentials: true
         });
+        
+        if (response.data.errors) {
+            throw new Error(`Error on PaaS Side: ${response.data.errors[0].message}`);
+        }
 
-        if (!response.data?.users?.nodes) {
+        if (!response.data.data?.users?.nodes) {
             throw new Error('Invalid response format from users query');
         }
 
-        return response.data.users.nodes;
+        return response.data.data.users.nodes;
     } catch (error) {
         console.error('Error fetching users:', error);
-        throw new Error('Failed to fetch users from the plan. Please check your API key and try again.');
+        throw error;
     }
 };
 
@@ -124,7 +113,7 @@ export const addUsersToChannel = async (
 
     try {
         // Fetch all users and find their IDs
-        const users = await fetchUsers();
+        const users = await fetchUsers(actorPsUserId);
         const { userIds, notFoundEmails } = findUserIdsByEmails(users, emails);
 
         if (notFoundEmails.length > 0) {
@@ -135,24 +124,32 @@ export const addUsersToChannel = async (
             throw new Error('No valid users found to add to the channel');
         }
 
-        const response = await client.mutate({
-            mutation: ADD_CHANNEL_MEMBERS,
-            variables: {
-                input: {
-                    channelId,
-                    memberPsUserIds: userIds,
-                    actorPsUserId,
-                    instructions,
-                    skipNotificationEmail,
-                },
-            },
+        const query = `mutation {
+  addChannelMembers(input: {
+    channelId: "${channelId}"
+    memberPsUserIds: ${JSON.stringify(userIds)}
+    actorPsUserId: "${actorPsUserId}"
+    instructions: "${instructions || ''}"
+    skipNotificationEmail: ${skipNotificationEmail || false}
+  }) {
+    memberPsUserIds
+    channelId
+    actorPsUserId
+    instructions
+    skipNotificationEmail
+  }
+}`;
+
+        const response = await axios.post(APIURL, { query }, { 
+            headers: getHeaders(actorPsUserId),
+            withCredentials: true
         });
 
-        if (!response.data?.addChannelMembers) {
-            throw new Error('Invalid response from addChannelMembers mutation');
+        if (response.data.errors) {
+            throw new Error(`Error on PaaS Side: ${response.data.errors[0].message}`);
         }
 
-        return response.data.addChannelMembers;
+        return response.data.data.addChannelMembers;
     } catch (error) {
         console.error('Error adding users to channel:', error);
         throw error;
@@ -168,7 +165,7 @@ export const addUsersToRoleIQ = async (
 
     try {
         // Fetch all users and find their IDs
-        const users = await fetchUsers();
+        const users = await fetchUsers(assignedByPsUserId);
         const { userIds, notFoundEmails } = findUserIdsByEmails(users, emails);
 
         if (notFoundEmails.length > 0) {
@@ -179,23 +176,30 @@ export const addUsersToRoleIQ = async (
             throw new Error('No valid users found to add to Role IQ');
         }
 
-        const response = await client.mutate({
-            mutation: ASSIGN_USERS_TO_ROLE,
-            variables: {
-                input: {
-                    roleId,
-                    psUserIds: userIds,
-                    assignedByPsUserId,
-                    message,
-                },
-            },
+        const query = `mutation {
+  assignUsersToRole(input: {
+    roleId: "${roleId}"
+    psUserIds: ${JSON.stringify(userIds)}
+    assignedByPsUserId: "${assignedByPsUserId}"
+    message: "${message || ''}"
+  }) {
+    assignedByPsUserId
+    roleId
+    psUserIds
+    message
+  }
+}`;
+
+        const response = await axios.post(APIURL, { query }, { 
+            headers: getHeaders(assignedByPsUserId),
+            withCredentials: true
         });
 
-        if (!response.data?.assignUsersToRole) {
-            throw new Error('Invalid response from assignUsersToRole mutation');
+        if (response.data.errors) {
+            throw new Error(`Error on PaaS Side: ${response.data.errors[0].message}`);
         }
 
-        return response.data.assignUsersToRole;
+        return response.data.data.assignUsersToRole;
     } catch (error) {
         console.error('Error adding users to Role IQ:', error);
         throw error;

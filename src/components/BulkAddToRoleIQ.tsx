@@ -52,25 +52,20 @@ const BulkAddToRoleIQ = () => {
     if (checked) {
       setRoleIQId("demo-roleiq-123");
       setApiKey("demo-api-key-456");
-      // Load dummy CSV file
-      fetch('/dummy-users.csv')
-        .then(response => response.text())
-        .then(csvText => {
-          Papa.parse(csvText, {
-            complete: (results) => {
-              const emails = results.data
-                .slice(1)
-                .map((row: any) => row.email)
-                .filter(Boolean);
-              setEmails(emails);
-              setSelectedFile(new File([csvText], 'dummy-users.csv', { type: 'text/csv' }));
-            },
-            header: true,
-          });
-        });
+      setOwnerEmail("demo.owner@pluralsight.com");
+      // Set some demo emails with @pluralsight.com domain
+      setEmails([
+        "john.doe@pluralsight.com",
+        "jane.smith@pluralsight.com",
+        "mike.wilson@pluralsight.com",
+        "sarah.johnson@pluralsight.com",
+        "alex.brown@pluralsight.com"
+      ]);
+      setSelectedFile(new File([""], "demo-users.csv", { type: "text/csv" }));
     } else {
       setRoleIQId("");
       setApiKey("");
+      setOwnerEmail("");
       setSelectedFile(null);
       setEmails([]);
       setPreviewData([]);
@@ -125,10 +120,10 @@ const BulkAddToRoleIQ = () => {
   };
 
   const handlePreview = async () => {
-    if (!selectedFile || !roleIQId || !apiKey) {
+    if (!roleIQId || !apiKey) {
       toast({
         title: "Missing Information",
-        description: "Please provide Role IQ ID, API key, and select a file",
+        description: "Please provide Role IQ ID and API key",
         variant: "destructive",
       });
       return;
@@ -143,15 +138,33 @@ const BulkAddToRoleIQ = () => {
         console.log('Users to preview:', emails);
         console.log('========================');
         
-        // In demo mode, mark all emails as ready
-        const preview = emails.map(email => ({
-          email,
-          status: 'ready' as const
-        }));
+        // In demo mode, show a mix of statuses
+        const preview = emails.map((email, index) => {
+          // Distribute statuses evenly
+          const statusIndex = index % 3;
+          switch (statusIndex) {
+            case 0:
+              return { email, status: 'ready' as const };
+            case 1:
+              return { 
+                email, 
+                status: 'error' as const,
+                message: 'User not found in plan'
+              };
+            case 2:
+              return { 
+                email, 
+                status: 'exists' as const,
+                message: 'User already in Role IQ'
+              };
+            default:
+              return { email, status: 'ready' as const };
+          }
+        });
         setPreviewData(preview);
         toast({
           title: "Preview Ready",
-          description: `Found ${emails.length} users ready to add`,
+          description: `Found ${emails.length} users with mixed statuses`,
         });
       } else {
         console.log('=== Preview Debug Info ===');
@@ -233,10 +246,25 @@ const BulkAddToRoleIQ = () => {
       console.log('Users to add:', readyUsers);
       console.log('========================');
       
+      // Show success message with added users
       toast({
-        title: "Demo Mode",
-        description: `Would add ${readyUsers.length} users to Role IQ ${roleIQId} (Owner: ${ownerEmail})`,
+        title: "Users Added Successfully",
+        description: `Successfully added ${readyUsers.length} users to Role IQ ${roleIQId}`,
       });
+
+      // Update preview data to show only ready users as added
+      const updatedPreview = previewData.map(user => {
+        if (user.status === 'ready') {
+          return {
+            ...user,
+            status: 'exists' as const,
+            message: 'User added to Role IQ'
+          };
+        }
+        // Keep error and exists statuses unchanged
+        return user;
+      });
+      setPreviewData(updatedPreview);
       return;
     }
     
@@ -306,7 +334,7 @@ const BulkAddToRoleIQ = () => {
         <form onSubmit={handleSubmit} className="space-y-8">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
             <div className="space-y-3">
-              <Label htmlFor="roleIQId" className="text-sm font-medium text-gray-700">Role IQ ID</Label>
+              <Label htmlFor="roleIQId" className="text-sm font-medium text-gray-700">RoleIQ ID</Label>
               <Input
                 id="roleIQId"
                 value={roleIQId}
@@ -341,7 +369,7 @@ const BulkAddToRoleIQ = () => {
             </div>
 
             <div className="space-y-3">
-              <Label htmlFor="ownerEmail" className="text-sm font-medium text-gray-700">Owner Email ID</Label>
+              <Label htmlFor="ownerEmail" className="text-sm font-medium text-gray-700">RoleIQ Owner Email ID</Label>
               <Input
                 id="ownerEmail"
                 type="email"
@@ -459,13 +487,14 @@ const BulkAddToRoleIQ = () => {
                       <TableCell>
                         <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${
                           user.status === 'ready' 
-                            ? 'bg-gray-100 text-gray-700'
+                            ? 'bg-green-50 text-green-700 border border-green-200'
                             : user.status === 'exists'
-                            ? 'bg-gray-100 text-gray-700'
-                            : 'bg-gray-100 text-gray-700'
+                            ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                            : 'bg-red-50 text-red-700 border border-red-200'
                         }`}>
-                          {user.status === 'ready' && <Check className="mr-1.5 h-3.5 w-3.5 text-gray-500" />}
-                          {user.status === 'error' && <X className="mr-1.5 h-3.5 w-3.5 text-gray-500" />}
+                          {user.status === 'ready' && <Check className="mr-1.5 h-3.5 w-3.5 text-green-500" />}
+                          {user.status === 'error' && <X className="mr-1.5 h-3.5 w-3.5 text-red-500" />}
+                          {user.status === 'exists' && <Check className="mr-1.5 h-3.5 w-3.5 text-blue-500" />}
                           {user.status === 'ready' ? 'Ready' : user.status === 'exists' ? 'Exists' : 'Error'}
                         </span>
                       </TableCell>

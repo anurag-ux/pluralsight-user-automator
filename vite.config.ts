@@ -14,5 +14,12 @@ export default defineConfig({
     'process.env': {
       VITE_GRAPHQL_ENDPOINT: JSON.stringify('https://api.pluralsight.com/graphql')
     }
+  },
+  server: {
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization, clientversion'
+    }
   }
 });
