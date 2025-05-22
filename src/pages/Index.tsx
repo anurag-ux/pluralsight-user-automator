@@ -1,11 +1,11 @@
 
 import { useState } from "react";
 import BulkAddToChannel from "@/components/BulkAddToChannel";
-import BulkCreateUsers from "@/components/BulkCreateUsers";
+import BulkAddToRoleIQ from "@/components/BulkAddToRoleIQ";
 import Header from "@/components/Header";
 
 const Index = () => {
-  const [activeTab, setActiveTab] = useState<"add" | "create">("add");
+  const [activeTab, setActiveTab] = useState<"add" | "roleiq">("add");
 
   return (
     <div className="min-h-screen bg-ps-bg flex flex-col">
@@ -28,19 +28,19 @@ const Index = () => {
             <button
               type="button"
               className={`px-6 py-3 text-sm font-medium rounded-r-lg ${
-                activeTab === "create"
+                activeTab === "roleiq"
                   ? "bg-ps-pink text-white"
                   : "bg-white text-ps-dark1 hover:bg-ps-panel"
               }`}
-              onClick={() => setActiveTab("create")}
+              onClick={() => setActiveTab("roleiq")}
             >
-              Bulk Create Users
+              Bulk Add to Role IQ
             </button>
           </div>
         </div>
 
         <div className="max-w-5xl mx-auto">
-          {activeTab === "add" ? <BulkAddToChannel /> : <BulkCreateUsers />}
+          {activeTab === "add" ? <BulkAddToChannel /> : <BulkAddToRoleIQ />}
         </div>
       </main>
       

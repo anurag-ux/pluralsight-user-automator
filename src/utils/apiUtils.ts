@@ -75,6 +75,32 @@ export const addUserToChannel = async (
   }
 };
 
+// Add user to Role IQ
+export const addUserToRoleIQ = async (
+  roleIqId: string,
+  userHandle: string,
+  apiKey: string
+): Promise<boolean> => {
+  try {
+    await axios.post(
+      `${PLURALSIGHT_API_BASE_URL}/roleiq/${roleIqId}/users`,
+      {
+        handle: userHandle,
+      },
+      {
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+    return true;
+  } catch (error) {
+    console.error('Error adding user to Role IQ:', error);
+    return false;
+  }
+};
+
 // Create new user
 export const createUser = async (
   email: string,
