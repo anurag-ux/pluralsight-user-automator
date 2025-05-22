@@ -1,430 +1,442 @@
-
 import React, { useState, useRef } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Loader, Check, X } from "lucide-react";
-import { 
-  parseCSV, 
-  CsvUser, 
-  generateCsvDownload 
-} from "@/utils/csvUtils";
-import { 
-  fetchUserByEmail, 
-  addUserToChannel,
-  UserAssignment 
-} from "@/utils/apiUtils";
+import { Loader2, Check, X, Download } from "lucide-react";
+import { Label } from '@/components/ui/label';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { useBulkAssignment } from '@/hooks/useBulkAssignment';
+import { Switch } from "@/components/ui/switch";
+import Papa from 'papaparse';
+
+interface UserPreview {
+  email: string;
+  status: 'ready' | 'exists' | 'error';
+  message?: string;
+}
 
 const BulkAddToChannel = () => {
   const { toast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
   
+  const [isDemoMode, setIsDemoMode] = useState(false);
   const [channelId, setChannelId] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const [userAssignments, setUserAssignments] = useState<UserAssignment[]>([]);
-  const [isPreviewed, setIsPreviewed] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [results, setResults] = useState<{
-    success: number;
-    failed: number;
-    details: Array<{email: string; status: string; message?: string}>;
-  }>({
-    success: 0,
-    failed: 0,
-    details: []
-  });
+  const [emails, setEmails] = useState<string[]>([]);
+  const [previewData, setPreviewData] = useState<UserPreview[]>([]);
+  const [isPreviewing, setIsPreviewing] = useState(false);
+  const { isLoading, addUsersToChannel, validateEmails } = useBulkAssignment();
+  const [ownerEmail, setOwnerEmail] = useState("");
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files.length > 0) {
-      setSelectedFile(e.target.files[0]);
-      setIsPreviewed(false);
-      setUserAssignments([]);
-      setResults({
-        success: 0,
-        failed: 0,
-        details: []
-      });
+  const handleDemoModeToggle = (checked: boolean) => {
+    setIsDemoMode(checked);
+    if (checked) {
+      setChannelId("demo-channel-123");
+      setApiKey("demo-api-key-456");
+      // Load dummy CSV file
+      fetch('/dummy-users.csv')
+        .then(response => response.text())
+        .then(csvText => {
+          Papa.parse(csvText, {
+            complete: (results) => {
+              const emails = results.data
+                .slice(1)
+                .map((row: any) => row.email)
+                .filter(Boolean);
+              setEmails(emails);
+              setSelectedFile(new File([csvText], 'dummy-users.csv', { type: 'text/csv' }));
+            },
+            header: true,
+          });
+        });
+    } else {
+      setChannelId("");
+      setApiKey("");
+      setSelectedFile(null);
+      setEmails([]);
+      setPreviewData([]);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
     }
   };
 
-  const handlePreviewClick = async () => {
-    if (!selectedFile) {
+  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const selectedFile = event.target.files?.[0];
+    if (selectedFile) {
+      setSelectedFile(selectedFile);
+      Papa.parse(selectedFile, {
+        complete: (results) => {
+          const emails = results.data
+            .slice(1)
+            .map((row: any) => row.email)
+            .filter(Boolean);
+          setEmails(emails);
+        },
+        header: true,
+      });
+      setPreviewData([]);
+      setIsPreviewing(false);
+    }
+  };
+
+  const handlePreview = async () => {
+    if (!selectedFile || !channelId || !apiKey) {
       toast({
-        title: "No file selected",
-        description: "Please select a CSV file containing user emails",
+        title: "Missing Information",
+        description: "Please provide channel ID, API key, and select a file",
         variant: "destructive",
       });
       return;
     }
 
-    if (!apiKey) {
-      toast({
-        title: "API Key Required",
-        description: "Please enter your Pluralsight Plan API Key",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    setIsLoading(true);
-    
+    setIsPreviewing(true);
     try {
-      const users: CsvUser[] = await parseCSV(selectedFile);
-      
-      if (users.length === 0) {
+      if (isDemoMode) {
+        console.log('=== Demo Mode Preview Debug Info ===');
+        console.log('Channel ID:', channelId);
+        console.log('Owner Email:', ownerEmail);
+        console.log('Users to preview:', emails);
+        console.log('========================');
+        
+        // In demo mode, mark all emails as ready
+        const preview = emails.map(email => ({
+          email,
+          status: 'ready' as const
+        }));
+        setPreviewData(preview);
         toast({
-          title: "No valid users found",
-          description: "The CSV file does not contain any valid email addresses",
-          variant: "destructive",
+          title: "Preview Ready",
+          description: `Found ${emails.length} users ready to add`,
         });
-        setIsLoading(false);
-        return;
-      }
-
-      // Process users in batches to not overwhelm the API
-      const batchSize = 5;
-      const assignments: UserAssignment[] = [];
-
-      for (let i = 0; i < users.length; i += batchSize) {
-        const batch = users.slice(i, i + batchSize);
-        const batchPromises = batch.map(async (user) => {
-          try {
-            const pluralsightUser = await fetchUserByEmail(user.email, apiKey);
-            
-            if (pluralsightUser) {
-              return {
-                email: user.email,
-                handle: pluralsightUser.handle,
-                status: 'ready' as const
-              };
-            } else {
-              return {
-                email: user.email,
-                status: 'not_found' as const
-              };
-            }
-          } catch (error) {
+      } else {
+        console.log('=== Preview Debug Info ===');
+        console.log('Channel ID:', channelId);
+        console.log('Owner Email:', ownerEmail);
+        console.log('Users to validate:', emails);
+        
+        const { valid, invalid } = await validateEmails(emails);
+        
+        console.log('Valid users:', valid);
+        console.log('Invalid users:', invalid);
+        console.log('========================');
+        
+        const preview = emails.map(email => {
+          if (invalid.includes(email)) {
             return {
-              email: user.email,
+              email,
               status: 'error' as const,
-              errorMessage: 'Failed to fetch user'
+              message: 'User not found in plan'
             };
           }
+          return {
+            email,
+            status: 'ready' as const
+          };
         });
-
-        const batchResults = await Promise.all(batchPromises);
-        assignments.push(...batchResults);
-      }
-
-      setUserAssignments(assignments);
-      setIsPreviewed(true);
-      
-      toast({
-        title: "Preview Ready",
-        description: `Found ${assignments.filter(a => a.status === 'ready').length} of ${assignments.length} users`,
-      });
-    } catch (error) {
-      toast({
-        title: "Error processing CSV",
-        description: "There was an error processing the CSV file",
-        variant: "destructive",
-      });
-      console.error("CSV processing error:", error);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleSubmit = async () => {
-    if (!channelId) {
-      toast({
-        title: "Channel ID Required",
-        description: "Please enter the Pluralsight Channel ID",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    if (!apiKey) {
-      toast({
-        title: "API Key Required",
-        description: "Please enter your Pluralsight Plan API Key",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    if (userAssignments.length === 0 || !isPreviewed) {
-      toast({
-        title: "Preview Required",
-        description: "Please preview your assignments before submitting",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    setIsSubmitting(true);
-    const results = {
-      success: 0,
-      failed: 0,
-      details: [] as Array<{email: string; status: string; message?: string}>
-    };
-
-    // Process ready users in batches
-    const readyUsers = userAssignments.filter(user => user.status === 'ready');
-    const batchSize = 5;
-
-    for (let i = 0; i < readyUsers.length; i += batchSize) {
-      const batch = readyUsers.slice(i, i + batchSize);
-      
-      await Promise.all(batch.map(async (user) => {
-        if (user.handle) {
-          try {
-            const success = await addUserToChannel(channelId, user.handle, apiKey);
-            
-            if (success) {
-              results.success++;
-              results.details.push({
-                email: user.email,
-                status: 'success'
-              });
-            } else {
-              results.failed++;
-              results.details.push({
-                email: user.email,
-                status: 'failed',
-                message: 'API error adding user to channel'
-              });
-            }
-          } catch (error) {
-            results.failed++;
-            results.details.push({
-              email: user.email,
-              status: 'failed',
-              message: 'Error adding user to channel'
-            });
-          }
+        
+        setPreviewData(preview);
+        
+        if (invalid.length > 0) {
+          toast({
+            title: "Some Users Not Found",
+            description: `${invalid.length} users were not found in the plan`,
+            variant: "destructive",
+          });
+        } else {
+          toast({
+            title: "Preview Ready",
+            description: `Found ${valid.length} users ready to add`,
+          });
         }
-      }));
-    }
-
-    // Add not found users to results
-    userAssignments
-      .filter(user => user.status === 'not_found' || user.status === 'error')
-      .forEach(user => {
-        results.failed++;
-        results.details.push({
-          email: user.email,
-          status: 'failed',
-          message: user.status === 'not_found' ? 'User not found' : user.errorMessage
-        });
+      }
+    } catch (error) {
+      console.error('=== Preview Error ===');
+      console.error('Error details:', error);
+      console.error('========================');
+      
+      toast({
+        title: "Preview Failed",
+        description: "Failed to preview users. Please try again.",
+        variant: "destructive",
       });
-
-    setResults(results);
-    setIsSubmitting(false);
-
-    toast({
-      title: "Assignment Complete",
-      description: `Successfully added ${results.success} users, failed to add ${results.failed} users`,
-      variant: results.failed > 0 ? "destructive" : "default",
-    });
+    } finally {
+      setIsPreviewing(false);
+    }
   };
 
-  const handleDownloadResults = () => {
-    if (results.details.length === 0) return;
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!channelId || emails.length === 0 || !apiKey || !ownerEmail) return;
     
-    const downloadData = results.details.map(detail => ({
-      email: detail.email,
-      status: detail.status,
-      message: detail.message || ''
-    }));
+    const readyUsers = previewData
+      .filter(user => user.status === 'ready')
+      .map(user => user.email);
     
-    generateCsvDownload(downloadData, 'channel-assignment-results.csv');
+    if (readyUsers.length === 0) {
+      toast({
+        title: "No Users to Add",
+        description: "All users are already in the channel or have errors",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (isDemoMode) {
+      console.log('=== Demo Mode Debug Info ===');
+      console.log('Channel ID:', channelId);
+      console.log('Owner Email:', ownerEmail);
+      console.log('Users to add:', readyUsers);
+      console.log('========================');
+      
+      toast({
+        title: "Demo Mode",
+        description: `Would add ${readyUsers.length} users to channel ${channelId} (Owner: ${ownerEmail})`,
+      });
+      return;
+    }
+    
+    try {
+      console.log('=== Channel Creation Debug Info ===');
+      console.log('Channel ID:', channelId);
+      console.log('Owner Email:', ownerEmail);
+      console.log('Users to add:', readyUsers);
+      console.log('API Mutation Input:', {
+        channelId,
+        memberPsUserIds: readyUsers,
+        actorPsUserId: apiKey,
+        assignedByPsUserId: apiKey,
+      });
+      
+      const result = await addUsersToChannel(channelId, readyUsers, {
+        actorPsUserId: apiKey,
+        assignedByPsUserId: apiKey,
+      });
+
+      console.log('Success Response:', result);
+      console.log('========================');
+    } catch (error) {
+      console.error('=== Channel Creation Error ===');
+      console.error('Error details:', error);
+      console.error('API Mutation Input:', {
+        channelId,
+        memberPsUserIds: readyUsers,
+        actorPsUserId: apiKey,
+        assignedByPsUserId: apiKey,
+      });
+      console.error('========================');
+      throw error;
+    }
   };
 
   const handleClearForm = () => {
     setSelectedFile(null);
-    setUserAssignments([]);
-    setIsPreviewed(false);
-    setResults({
-      success: 0,
-      failed: 0,
-      details: []
-    });
-    
-    // Reset the file input
+    setEmails([]);
+    setPreviewData([]);
+    setIsPreviewing(false);
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
   };
 
   return (
-    <div className="bg-white rounded-lg shadow-lg p-6">
-      <h2 className="text-2xl font-semibold text-ps-dark1 mb-4">Bulk Add to Channel</h2>
-      
-      <div className="space-y-6">
-        <div>
-          <label className="block text-ps-heading font-medium mb-2">
-            Upload CSV of User Emails
-          </label>
-          <div className="flex items-center">
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".csv"
-              onChange={handleFileChange}
-              className="block w-full text-sm text-ps-neutral file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-ps-panel file:text-ps-dark1 hover:file:bg-ps-panel/90"
+    <Card className="bg-white/50 backdrop-blur-sm shadow-lg rounded-2xl overflow-hidden border border-gray-100">
+      <CardHeader className="bg-gradient-to-r from-gray-900 to-gray-800 p-8">
+        <div className="flex justify-between items-center">
+          <div>
+            <CardTitle className="text-white text-2xl font-light tracking-wide">Bulk Add Users</CardTitle>
+            <p className="text-gray-400 mt-1 text-sm">Add multiple users to a channel at once</p>
+          </div>
+          <div className="flex items-center space-x-3 bg-white/5 px-4 py-2 rounded-full backdrop-blur-sm">
+            <Switch
+              id="demo-mode"
+              checked={isDemoMode}
+              onCheckedChange={handleDemoModeToggle}
+              className="data-[state=checked]:bg-gray-700"
             />
+            <Label htmlFor="demo-mode" className="text-gray-300 text-sm font-medium">Demo Mode</Label>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="p-8 space-y-8">
+        <form onSubmit={handleSubmit} className="space-y-8">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+            <div className="space-y-3">
+              <Label htmlFor="channelId" className="text-sm font-medium text-gray-700">Channel ID</Label>
+              <Input
+                id="channelId"
+                value={channelId}
+                onChange={(e) => setChannelId(e.target.value)}
+                placeholder="Enter channel ID"
+                required
+                className="h-11 rounded-lg border border-gray-200 bg-white/50 backdrop-blur-sm focus:border-gray-400 focus:ring-2 focus:ring-gray-100 transition-all duration-200 text-gray-700 placeholder:text-gray-400"
+              />
+            </div>
+
+            <div className="space-y-3">
+              <div className="flex justify-between items-center">
+                <Label htmlFor="apiKey" className="text-sm font-medium text-gray-700">API Key</Label>
+                <a 
+                  href="https://developer.pluralsight.com/manage-keys" 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  className="text-sm text-blue-600 hover:text-blue-800 hover:underline"
+                >
+                  Get API Key
+                </a>
+              </div>
+              <Input
+                id="apiKey"
+                type="password"
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                placeholder="Enter API Key"
+                required
+                className="h-11 rounded-lg border border-gray-200 bg-white/50 backdrop-blur-sm focus:border-gray-400 focus:ring-2 focus:ring-gray-100 transition-all duration-200 text-gray-700 placeholder:text-gray-400"
+              />
+            </div>
+
+            <div className="space-y-3">
+              <Label htmlFor="ownerEmail" className="text-sm font-medium text-gray-700">Owner Email ID</Label>
+              <Input
+                id="ownerEmail"
+                type="email"
+                value={ownerEmail}
+                onChange={(e) => setOwnerEmail(e.target.value)}
+                placeholder="Enter owner email"
+                required
+                className="h-11 rounded-lg border border-gray-200 bg-white/50 backdrop-blur-sm focus:border-gray-400 focus:ring-2 focus:ring-gray-100 transition-all duration-200 text-gray-700 placeholder:text-gray-400"
+              />
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            <div className="flex justify-between items-center">
+              <Label htmlFor="file" className="text-sm font-medium text-gray-700">User Emails CSV File</Label>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  const csvContent = "email\nuser@example.com\nanother@example.com";
+                  const blob = new Blob([csvContent], { type: 'text/csv' });
+                  const url = window.URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = 'user-emails-template.csv';
+                  document.body.appendChild(a);
+                  a.click();
+                  document.body.removeChild(a);
+                  window.URL.revokeObjectURL(url);
+                }}
+                className="text-sm"
+              >
+                <Download className="h-4 w-4 mr-2" />
+                Download Template
+              </Button>
+            </div>
+            <div className="relative">
+              <Input
+                id="file"
+                type="file"
+                accept=".csv"
+                onChange={handleFileChange}
+                required
+                className="h-11 rounded-lg border border-gray-200 bg-white/50 backdrop-blur-sm focus:border-gray-400 focus:ring-2 focus:ring-gray-100 transition-all duration-200 text-gray-700 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-medium file:bg-gray-100 file:text-gray-700 hover:file:bg-gray-200 p-2"
+              />
+            </div>
             {selectedFile && (
-              <Button 
-                variant="outline" 
-                size="sm" 
-                className="ml-2" 
-                onClick={handleClearForm}
-              >
-                <X className="h-4 w-4" />
-              </Button>
+              <p className="text-sm text-gray-500 mt-2 flex items-center">
+                <Check className="h-4 w-4 mr-2 text-gray-400" />
+                {emails.length} users found in {selectedFile.name}
+              </p>
             )}
           </div>
-          {selectedFile && (
-            <p className="mt-1 text-sm text-ps-neutral">Selected: {selectedFile.name}</p>
-          )}
-        </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label className="block text-ps-heading font-medium mb-2">
-              Pluralsight Channel ID
-            </label>
-            <Input
-              type="text"
-              value={channelId}
-              onChange={(e) => setChannelId(e.target.value)}
-              className="w-full"
-              placeholder="Enter Channel ID"
-            />
-          </div>
-          <div>
-            <label className="block text-ps-heading font-medium mb-2">
-              Pluralsight Plan API Key
-            </label>
-            <Input
-              type="password"
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              className="w-full"
-              placeholder="Enter API Key"
-            />
-          </div>
-        </div>
-
-        <div className="flex justify-center">
-          <Button 
-            onClick={handlePreviewClick} 
-            className="bg-ps-blue-bright hover:bg-ps-blue-bright/90 text-white"
-            disabled={isLoading || !selectedFile}
-          >
-            {isLoading ? (
-              <>
-                <Loader className="mr-2 h-4 w-4 animate-spin" />
-                Loading...
-              </>
-            ) : (
-              'Preview Assignments'
-            )}
-          </Button>
-        </div>
-
-        {isPreviewed && userAssignments.length > 0 && (
-          <div className="mt-6">
-            <h3 className="text-lg font-medium text-ps-dark1 mb-2">Preview Results</h3>
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-ps-panel">
-                <thead className="bg-ps-table">
-                  <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-ps-neutral uppercase tracking-wider">
-                      Email
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-ps-neutral uppercase tracking-wider">
-                      User Handle
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-ps-neutral uppercase tracking-wider">
-                      Status
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-ps-panel">
-                  {userAssignments.map((user, index) => (
-                    <tr key={index}>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-ps-dark1">
-                        {user.email}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-ps-dark1">
-                        {user.handle || '-'}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                          user.status === 'ready' 
-                            ? 'bg-green-100 text-green-800' 
-                            : user.status === 'not_found'
-                            ? 'bg-yellow-100 text-yellow-800'
-                            : 'bg-red-100 text-red-800'
-                        }`}>
-                          {user.status === 'ready' && <Check className="mr-1 h-3 w-3" />}
-                          {user.status === 'error' && <X className="mr-1 h-3 w-3" />}
-                          {user.status === 'ready' ? 'Ready' : user.status === 'not_found' ? 'Not Found' : 'Error'}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            <div className="mt-6 flex justify-center">
-              <Button 
-                onClick={handleSubmit} 
-                className="bg-ps-pink hover:bg-ps-pink/90 text-white"
-                disabled={isSubmitting || userAssignments.filter(u => u.status === 'ready').length === 0}
-              >
-                {isSubmitting ? (
-                  <>
-                    <Loader className="mr-2 h-4 w-4 animate-spin" />
-                    Processing...
-                  </>
-                ) : (
-                  'Submit to Channel'
-                )}
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {results.details.length > 0 && (
-          <div className="mt-6">
-            <h3 className="text-lg font-medium text-ps-dark1 mb-2">Assignment Results</h3>
-            <div className="grid grid-cols-2 gap-4 mb-4">
-              <div className="bg-green-50 p-4 rounded">
-                <p className="text-sm text-green-800">Success: {results.success}</p>
-              </div>
-              <div className="bg-red-50 p-4 rounded">
-                <p className="text-sm text-red-800">Failed: {results.failed}</p>
-              </div>
-            </div>
-            
-            <Button 
-              variant="outline" 
-              onClick={handleDownloadResults}
-              className="w-full mt-2"
+          <div className="flex gap-4 pt-4">
+            <Button
+              type="button"
+              onClick={handlePreview}
+              disabled={isLoading || !channelId || !apiKey || emails.length === 0}
+              className="bg-gray-900 hover:bg-gray-800 text-white px-6 py-2 rounded-lg transition-all duration-200 hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium"
             >
-              Download Results as CSV
+              {isPreviewing ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Previewing...
+                </>
+              ) : (
+                'Preview Users'
+              )}
+            </Button>
+
+            <Button
+              type="submit"
+              disabled={isLoading || !channelId || !apiKey || emails.length === 0 || previewData.length === 0}
+              className="bg-gray-800 hover:bg-gray-700 text-white px-6 py-2 rounded-lg transition-all duration-200 hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium"
+            >
+              {isLoading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Processing...
+                </>
+              ) : (
+                'Add Users to Channel'
+              )}
+            </Button>
+
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleClearForm}
+              className="border-gray-200 text-gray-600 hover:bg-gray-50 px-6 py-2 rounded-lg transition-all duration-200 text-sm font-medium"
+            >
+              Clear Form
             </Button>
           </div>
+        </form>
+
+        {previewData.length > 0 && (
+          <div className="mt-8 animate-fadeIn">
+            <h3 className="text-lg font-medium mb-4 text-gray-800">Preview Results</h3>
+            <div className="border border-gray-100 rounded-xl overflow-hidden shadow-sm bg-white/50 backdrop-blur-sm">
+              <Table>
+                <TableHeader className="bg-gray-50/50">
+                  <TableRow className="hover:bg-gray-50/50">
+                    <TableHead className="font-medium text-gray-700 text-sm">User Email</TableHead>
+                    <TableHead className="font-medium text-gray-700 text-sm">Status</TableHead>
+                    <TableHead className="font-medium text-gray-700 text-sm">Message</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {previewData.map((user) => (
+                    <TableRow key={user.email} className="hover:bg-gray-50/50 transition-colors duration-150">
+                      <TableCell className="font-medium text-gray-700">{user.email}</TableCell>
+                      <TableCell>
+                        <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${
+                          user.status === 'ready' 
+                            ? 'bg-gray-100 text-gray-700'
+                            : user.status === 'exists'
+                            ? 'bg-gray-100 text-gray-700'
+                            : 'bg-gray-100 text-gray-700'
+                        }`}>
+                          {user.status === 'ready' && <Check className="mr-1.5 h-3.5 w-3.5 text-gray-500" />}
+                          {user.status === 'error' && <X className="mr-1.5 h-3.5 w-3.5 text-gray-500" />}
+                          {user.status === 'ready' ? 'Ready' : user.status === 'exists' ? 'Exists' : 'Error'}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-gray-500">{user.message || '-'}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </div>
         )}
-      </div>
-    </div>
+      </CardContent>
+    </Card>
   );
 };
 

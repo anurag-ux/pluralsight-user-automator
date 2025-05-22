@@ -1,9 +1,8 @@
-
 import React, { useState, useRef } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Loader, X } from "lucide-react";
+import { Loader2, Check, X, Download } from "lucide-react";
 import {
   Table,
   TableBody,
@@ -22,351 +21,464 @@ import {
   addUserToRoleIQ,
   UserAssignment
 } from "@/utils/apiUtils";
+import { useBulkAssignment } from '@/hooks/useBulkAssignment';
+import { Label } from '@/components/ui/label';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Switch } from "@/components/ui/switch";
+import Papa from 'papaparse';
+
+interface UserPreview {
+  email: string;
+  status: 'ready' | 'exists' | 'error';
+  message?: string;
+}
 
 const BulkAddToRoleIQ = () => {
   const { toast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
   
-  const [roleIqId, setRoleIqId] = useState("");
+  const [isDemoMode, setIsDemoMode] = useState(false);
+  const [roleIQId, setRoleIQId] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
+  const [emails, setEmails] = useState<string[]>([]);
+  const [previewData, setPreviewData] = useState<UserPreview[]>([]);
   const [isPreviewing, setIsPreviewing] = useState(false);
-  const [userAssignments, setUserAssignments] = useState<UserAssignment[]>([]);
-  
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files.length > 0) {
-      setSelectedFile(e.target.files[0]);
-      setUserAssignments([]);
+  const { isLoading, addUsersToRoleIQ, validateEmails } = useBulkAssignment();
+  const [ownerEmail, setOwnerEmail] = useState("");
+
+  const handleDemoModeToggle = (checked: boolean) => {
+    setIsDemoMode(checked);
+    if (checked) {
+      setRoleIQId("demo-roleiq-123");
+      setApiKey("demo-api-key-456");
+      // Load dummy CSV file
+      fetch('/dummy-users.csv')
+        .then(response => response.text())
+        .then(csvText => {
+          Papa.parse(csvText, {
+            complete: (results) => {
+              const emails = results.data
+                .slice(1)
+                .map((row: any) => row.email)
+                .filter(Boolean);
+              setEmails(emails);
+              setSelectedFile(new File([csvText], 'dummy-users.csv', { type: 'text/csv' }));
+            },
+            header: true,
+          });
+        });
+    } else {
+      setRoleIQId("");
+      setApiKey("");
+      setSelectedFile(null);
+      setEmails([]);
+      setPreviewData([]);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
     }
   };
 
-  const handlePreviewAssignments = async () => {
-    if (!selectedFile) {
-      toast({
-        title: "No file selected",
-        description: "Please select a CSV file containing user emails",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    if (!apiKey) {
-      toast({
-        title: "API Key Required",
-        description: "Please enter your Pluralsight Admin API Key",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    setIsLoading(true);
-    setIsPreviewing(true);
-    
-    try {
-      const users: CsvUser[] = await parseCSV(selectedFile);
+  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const selectedFile = event.target.files?.[0];
+    if (selectedFile) {
+      console.log('=== CSV File Processing Debug ===');
+      console.log('File name:', selectedFile.name);
+      console.log('File size:', selectedFile.size);
       
-      if (users.length === 0) {
-        toast({
-          title: "No valid users found",
-          description: "The CSV file does not contain any valid email addresses",
-          variant: "destructive",
-        });
-        setIsLoading(false);
-        return;
-      }
-
-      // Process users in batches
-      const batchSize = 5;
-      const assignments: UserAssignment[] = [];
-
-      for (let i = 0; i < users.length; i += batchSize) {
-        const batch = users.slice(i, i + batchSize);
+      setSelectedFile(selectedFile);
+      
+      // First read the file content
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const text = e.target?.result as string;
+        console.log('Raw file content:', text);
         
-        const batchPromises = batch.map(async (user) => {
-          try {
-            const userInfo = await fetchUserByEmail(user.email, apiKey);
+        Papa.parse(text, {
+          complete: (results) => {
+            console.log('Papa Parse results:', results);
+            console.log('Raw data:', results.data);
             
-            if (!userInfo) {
-              return {
-                email: user.email,
-                status: 'not_found' as const,
-                errorMessage: 'User not found in Pluralsight'
-              };
-            }
+            // More detailed parsing
+            const emails = results.data
+              .slice(1) // Skip header
+              .map((row: any) => {
+                console.log('Processing row:', row);
+                return row.email || row[0]; // Try both named and indexed access
+              })
+              .filter(Boolean);
             
+            console.log('Extracted emails:', emails);
+            setEmails(emails);
+          },
+          header: true,
+          skipEmptyLines: true,
+          transformHeader: (header) => header.trim().toLowerCase()
+        });
+      };
+      reader.readAsText(selectedFile);
+      
+      setPreviewData([]);
+      setIsPreviewing(false);
+    }
+  };
+
+  const handlePreview = async () => {
+    if (!selectedFile || !roleIQId || !apiKey) {
+      toast({
+        title: "Missing Information",
+        description: "Please provide Role IQ ID, API key, and select a file",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsPreviewing(true);
+    try {
+      if (isDemoMode) {
+        console.log('=== Demo Mode Preview Debug Info ===');
+        console.log('Role IQ ID:', roleIQId);
+        console.log('Owner Email:', ownerEmail);
+        console.log('Users to preview:', emails);
+        console.log('========================');
+        
+        // In demo mode, mark all emails as ready
+        const preview = emails.map(email => ({
+          email,
+          status: 'ready' as const
+        }));
+        setPreviewData(preview);
+        toast({
+          title: "Preview Ready",
+          description: `Found ${emails.length} users ready to add`,
+        });
+      } else {
+        console.log('=== Preview Debug Info ===');
+        console.log('Role IQ ID:', roleIQId);
+        console.log('Owner Email:', ownerEmail);
+        console.log('Users to validate:', emails);
+        
+        const { valid, invalid } = await validateEmails(emails);
+        
+        console.log('Valid users:', valid);
+        console.log('Invalid users:', invalid);
+        console.log('========================');
+        
+        const preview = emails.map(email => {
+          if (invalid.includes(email)) {
             return {
-              email: user.email,
-              handle: userInfo.handle,
-              status: 'ready' as const
-            };
-          } catch (error) {
-            return {
-              email: user.email,
+              email,
               status: 'error' as const,
-              errorMessage: 'Error fetching user information'
+              message: 'User not found in plan'
             };
           }
+          return {
+            email,
+            status: 'ready' as const
+          };
         });
-
-        const batchResults = await Promise.all(batchPromises);
-        assignments.push(...batchResults);
         
-        // Update assignments incrementally
-        setUserAssignments([...assignments]);
+        setPreviewData(preview);
+        
+        if (invalid.length > 0) {
+          toast({
+            title: "Some Users Not Found",
+            description: `${invalid.length} users were not found in the plan`,
+            variant: "destructive",
+          });
+        } else {
+          toast({
+            title: "Preview Ready",
+            description: `Found ${valid.length} users ready to add`,
+          });
+        }
       }
-      
-      const readyCount = assignments.filter(a => a.status === 'ready').length;
-      
-      toast({
-        title: "Preview Complete",
-        description: `Found ${readyCount} of ${users.length} users ready for Role IQ assignment.`,
-        variant: readyCount === 0 ? "destructive" : "default",
-      });
     } catch (error) {
+      console.error('=== Preview Error ===');
+      console.error('Error details:', error);
+      console.error('========================');
+      
       toast({
-        title: "Error processing CSV",
-        description: "There was an error processing the CSV file",
+        title: "Preview Failed",
+        description: "Failed to preview users. Please try again.",
         variant: "destructive",
       });
-      console.error("CSV processing error:", error);
     } finally {
-      setIsLoading(false);
+      setIsPreviewing(false);
     }
   };
 
-  const handleSubmitAssignments = async () => {
-    if (!roleIqId) {
-      toast({
-        title: "Role IQ ID Required",
-        description: "Please enter the Role IQ ID",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    const readyUsers = userAssignments.filter(user => user.status === 'ready');
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!roleIQId || emails.length === 0 || !apiKey || !ownerEmail) return;
+    
+    const readyUsers = previewData
+      .filter(user => user.status === 'ready')
+      .map(user => user.email);
     
     if (readyUsers.length === 0) {
       toast({
-        title: "No eligible users",
-        description: "No users are ready for Role IQ assignment",
+        title: "No Users to Add",
+        description: "All users are already in Role IQ or have errors",
         variant: "destructive",
       });
       return;
     }
 
-    setIsLoading(true);
-    
-    const results: UserAssignment[] = [...userAssignments];
-    let successCount = 0;
-    
-    // Process in sequential batches to avoid overwhelming the API
-    for (const user of readyUsers) {
-      try {
-        if (user.handle) {
-          const success = await addUserToRoleIQ(roleIqId, user.handle, apiKey);
-          
-          const userIndex = results.findIndex(u => u.email === user.email);
-          
-          if (success) {
-            results[userIndex] = {
-              ...results[userIndex],
-              status: 'ready',
-            };
-            successCount++;
-          } else {
-            results[userIndex] = {
-              ...results[userIndex],
-              status: 'error',
-              errorMessage: 'Failed to add to Role IQ'
-            };
-          }
-          
-          // Update UI after each operation
-          setUserAssignments([...results]);
-        }
-      } catch (error) {
-        console.error(`Error adding user ${user.email} to Role IQ:`, error);
-      }
+    if (isDemoMode) {
+      console.log('=== Demo Mode Debug Info ===');
+      console.log('Role IQ ID:', roleIQId);
+      console.log('Owner Email:', ownerEmail);
+      console.log('Users to add:', readyUsers);
+      console.log('========================');
+      
+      toast({
+        title: "Demo Mode",
+        description: `Would add ${readyUsers.length} users to Role IQ ${roleIQId} (Owner: ${ownerEmail})`,
+      });
+      return;
     }
     
-    setIsLoading(false);
-    
-    toast({
-      title: "Assignment Complete",
-      description: `Successfully added ${successCount} of ${readyUsers.length} users to Role IQ.`,
-      variant: successCount === readyUsers.length ? "default" : "destructive",
-    });
-  };
+    try {
+      console.log('=== Role IQ Assignment Debug Info ===');
+      console.log('Role IQ ID:', roleIQId);
+      console.log('Owner Email:', ownerEmail);
+      console.log('Users to add:', readyUsers);
+      console.log('API Mutation Input:', {
+        roleId: roleIQId,
+        psUserIds: readyUsers,
+        actorPsUserId: apiKey,
+        assignedByPsUserId: apiKey,
+      });
+      
+      const result = await addUsersToRoleIQ(roleIQId, readyUsers, {
+        actorPsUserId: apiKey,
+        assignedByPsUserId: apiKey,
+      });
 
-  const handleDownloadResults = () => {
-    if (userAssignments.length === 0) return;
-    
-    const downloadData = userAssignments.map(assignment => ({
-      email: assignment.email,
-      handle: assignment.handle || 'N/A',
-      status: assignment.status,
-      errorMessage: assignment.errorMessage || ''
-    }));
-    
-    generateCsvDownload(downloadData, 'role-iq-assignments-results.csv');
+      console.log('Success Response:', result);
+      console.log('========================');
+    } catch (error) {
+      console.error('=== Role IQ Assignment Error ===');
+      console.error('Error details:', error);
+      console.error('API Mutation Input:', {
+        roleId: roleIQId,
+        psUserIds: readyUsers,
+        actorPsUserId: apiKey,
+        assignedByPsUserId: apiKey,
+      });
+      console.error('========================');
+      throw error;
+    }
   };
 
   const handleClearForm = () => {
     setSelectedFile(null);
-    setUserAssignments([]);
+    setEmails([]);
+    setPreviewData([]);
     setIsPreviewing(false);
-    
-    // Reset the file input
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
   };
 
   return (
-    <div className="bg-white rounded-lg shadow-lg p-6">
-      <h2 className="text-2xl font-semibold text-ps-dark1 mb-4">Bulk Add to Role IQ</h2>
-      
-      <div className="space-y-6">
-        <div>
-          <label className="block text-ps-heading font-medium mb-2">
-            Upload CSV of User Emails
-          </label>
-          <div className="flex items-center">
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".csv"
-              onChange={handleFileChange}
-              className="block w-full text-sm text-ps-neutral file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-ps-panel file:text-ps-dark1 hover:file:bg-ps-panel/90"
-            />
-            {selectedFile && (
-              <Button 
-                variant="outline" 
-                size="sm" 
-                className="ml-2" 
-                onClick={handleClearForm}
-              >
-                <X className="h-4 w-4" />
-              </Button>
-            )}
+    <Card className="bg-white/50 backdrop-blur-sm shadow-lg rounded-2xl overflow-hidden border border-gray-100">
+      <CardHeader className="bg-gradient-to-r from-gray-900 to-gray-800 p-8">
+        <div className="flex justify-between items-center">
+          <div>
+            <CardTitle className="text-white text-2xl font-light tracking-wide">Bulk Add Users</CardTitle>
+            <p className="text-gray-400 mt-1 text-sm">Add multiple users to Role IQ at once</p>
           </div>
-          {selectedFile && (
-            <p className="mt-1 text-sm text-ps-neutral">Selected: {selectedFile.name}</p>
-          )}
-          <p className="mt-1 text-xs text-ps-neutral">
-            CSV should contain email addresses in a column labeled "email" or "Email"
-          </p>
+          <div className="flex items-center space-x-3 bg-white/5 px-4 py-2 rounded-full backdrop-blur-sm">
+            <Switch
+              id="demo-mode"
+              checked={isDemoMode}
+              onCheckedChange={handleDemoModeToggle}
+              className="data-[state=checked]:bg-gray-700"
+            />
+            <Label htmlFor="demo-mode" className="text-gray-300 text-sm font-medium">Demo Mode</Label>
+          </div>
         </div>
-
-        <div>
-          <label className="block text-ps-heading font-medium mb-2">
-            Pluralsight Admin API Key
-          </label>
-          <Input
-            type="password"
-            value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
-            className="w-full"
-            placeholder="Enter API Key"
-          />
-        </div>
-
-        <div className="flex justify-center">
-          <Button 
-            onClick={handlePreviewAssignments} 
-            className="bg-ps-blue hover:bg-ps-blue/90 text-white"
-            disabled={isLoading || !selectedFile}
-          >
-            {isLoading && isPreviewing ? (
-              <>
-                <Loader className="mr-2 h-4 w-4 animate-spin" />
-                Previewing...
-              </>
-            ) : (
-              'Preview Assignments'
-            )}
-          </Button>
-        </div>
-
-        {userAssignments.length > 0 && (
-          <>
-            <div>
-              <label className="block text-ps-heading font-medium mb-2">
-                Role IQ ID
-              </label>
+      </CardHeader>
+      <CardContent className="p-8 space-y-8">
+        <form onSubmit={handleSubmit} className="space-y-8">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+            <div className="space-y-3">
+              <Label htmlFor="roleIQId" className="text-sm font-medium text-gray-700">Role IQ ID</Label>
               <Input
-                type="text"
-                value={roleIqId}
-                onChange={(e) => setRoleIqId(e.target.value)}
-                className="w-full"
+                id="roleIQId"
+                value={roleIQId}
+                onChange={(e) => setRoleIQId(e.target.value)}
                 placeholder="Enter Role IQ ID"
+                required
+                className="h-11 rounded-lg border border-gray-200 bg-white/50 backdrop-blur-sm focus:border-gray-400 focus:ring-2 focus:ring-gray-100 transition-all duration-200 text-gray-700 placeholder:text-gray-400"
               />
             </div>
-            
-            <div className="overflow-x-auto">
-              <h3 className="text-lg font-medium text-ps-dark1 mb-2">User Assignment Preview</h3>
+
+            <div className="space-y-3">
+              <div className="flex justify-between items-center">
+                <Label htmlFor="apiKey" className="text-sm font-medium text-gray-700">API Key</Label>
+                <a 
+                  href="https://developer.pluralsight.com/manage-keys" 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  className="text-sm text-blue-600 hover:text-blue-800 hover:underline"
+                >
+                  Get API Key
+                </a>
+              </div>
+              <Input
+                id="apiKey"
+                type="password"
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                placeholder="Enter API Key"
+                required
+                className="h-11 rounded-lg border border-gray-200 bg-white/50 backdrop-blur-sm focus:border-gray-400 focus:ring-2 focus:ring-gray-100 transition-all duration-200 text-gray-700 placeholder:text-gray-400"
+              />
+            </div>
+
+            <div className="space-y-3">
+              <Label htmlFor="ownerEmail" className="text-sm font-medium text-gray-700">Owner Email ID</Label>
+              <Input
+                id="ownerEmail"
+                type="email"
+                value={ownerEmail}
+                onChange={(e) => setOwnerEmail(e.target.value)}
+                placeholder="Enter owner email"
+                required
+                className="h-11 rounded-lg border border-gray-200 bg-white/50 backdrop-blur-sm focus:border-gray-400 focus:ring-2 focus:ring-gray-100 transition-all duration-200 text-gray-700 placeholder:text-gray-400"
+              />
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            <div className="flex justify-between items-center">
+              <Label htmlFor="file" className="text-sm font-medium text-gray-700">User Emails CSV File</Label>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  const csvContent = "email\nuser@example.com\nanother@example.com";
+                  const blob = new Blob([csvContent], { type: 'text/csv' });
+                  const url = window.URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = 'user-emails-template.csv';
+                  document.body.appendChild(a);
+                  a.click();
+                  document.body.removeChild(a);
+                  window.URL.revokeObjectURL(url);
+                }}
+                className="text-sm"
+              >
+                <Download className="h-4 w-4 mr-2" />
+                Download Template
+              </Button>
+            </div>
+            <div className="relative">
+              <Input
+                id="file"
+                type="file"
+                accept=".csv"
+                onChange={handleFileChange}
+                required
+                className="h-11 rounded-lg border border-gray-200 bg-white/50 backdrop-blur-sm focus:border-gray-400 focus:ring-2 focus:ring-gray-100 transition-all duration-200 text-gray-700 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-medium file:bg-gray-100 file:text-gray-700 hover:file:bg-gray-200 p-2"
+              />
+            </div>
+            {selectedFile && (
+              <p className="text-sm text-gray-500 mt-2 flex items-center">
+                <Check className="h-4 w-4 mr-2 text-gray-400" />
+                {emails.length} users found in {selectedFile.name}
+              </p>
+            )}
+          </div>
+
+          <div className="flex gap-4 pt-4">
+            <Button
+              type="button"
+              onClick={handlePreview}
+              disabled={isLoading || !roleIQId || !apiKey || emails.length === 0}
+              className="bg-gray-900 hover:bg-gray-800 text-white px-6 py-2 rounded-lg transition-all duration-200 hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium"
+            >
+              {isPreviewing ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Previewing...
+                </>
+              ) : (
+                'Preview Users'
+              )}
+            </Button>
+
+            <Button
+              type="submit"
+              disabled={isLoading || !roleIQId || !apiKey || emails.length === 0 || previewData.length === 0}
+              className="bg-gray-800 hover:bg-gray-700 text-white px-6 py-2 rounded-lg transition-all duration-200 hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium"
+            >
+              {isLoading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Processing...
+                </>
+              ) : (
+                'Add Users to Role IQ'
+              )}
+            </Button>
+
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleClearForm}
+              className="border-gray-200 text-gray-600 hover:bg-gray-50 px-6 py-2 rounded-lg transition-all duration-200 text-sm font-medium"
+            >
+              Clear Form
+            </Button>
+          </div>
+        </form>
+
+        {previewData.length > 0 && (
+          <div className="mt-8 animate-fadeIn">
+            <h3 className="text-lg font-medium mb-4 text-gray-800">Preview Results</h3>
+            <div className="border border-gray-100 rounded-xl overflow-hidden shadow-sm bg-white/50 backdrop-blur-sm">
               <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Email</TableHead>
-                    <TableHead>User Handle</TableHead>
-                    <TableHead>Status</TableHead>
+                <TableHeader className="bg-gray-50/50">
+                  <TableRow className="hover:bg-gray-50/50">
+                    <TableHead className="font-medium text-gray-700 text-sm">Email</TableHead>
+                    <TableHead className="font-medium text-gray-700 text-sm">Status</TableHead>
+                    <TableHead className="font-medium text-gray-700 text-sm">Message</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {userAssignments.map((assignment, index) => (
-                    <TableRow key={index}>
-                      <TableCell>{assignment.email}</TableCell>
-                      <TableCell>{assignment.handle || 'N/A'}</TableCell>
+                  {previewData.map((user) => (
+                    <TableRow key={user.email} className="hover:bg-gray-50/50 transition-colors duration-150">
+                      <TableCell className="font-medium text-gray-700">{user.email}</TableCell>
                       <TableCell>
-                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                          assignment.status === 'ready' 
-                            ? 'bg-green-100 text-green-800' 
-                            : assignment.status === 'not_found'
-                            ? 'bg-yellow-100 text-yellow-800'
-                            : 'bg-red-100 text-red-800'
+                        <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${
+                          user.status === 'ready' 
+                            ? 'bg-gray-100 text-gray-700'
+                            : user.status === 'exists'
+                            ? 'bg-gray-100 text-gray-700'
+                            : 'bg-gray-100 text-gray-700'
                         }`}>
-                          {assignment.status === 'ready' ? 'Ready' : 
-                           assignment.status === 'not_found' ? 'Not Found' : 'Error'}
+                          {user.status === 'ready' && <Check className="mr-1.5 h-3.5 w-3.5 text-gray-500" />}
+                          {user.status === 'error' && <X className="mr-1.5 h-3.5 w-3.5 text-gray-500" />}
+                          {user.status === 'ready' ? 'Ready' : user.status === 'exists' ? 'Exists' : 'Error'}
                         </span>
                       </TableCell>
+                      <TableCell className="text-gray-500">{user.message || '-'}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
               </Table>
             </div>
-            
-            <div className="flex flex-col sm:flex-row gap-4">
-              <Button 
-                onClick={handleSubmitAssignments} 
-                className="bg-ps-pink hover:bg-ps-pink/90 text-white flex-1"
-                disabled={isLoading || userAssignments.filter(a => a.status === 'ready').length === 0}
-              >
-                {isLoading && !isPreviewing ? (
-                  <>
-                    <Loader className="mr-2 h-4 w-4 animate-spin" />
-                    Assigning to Role IQ...
-                  </>
-                ) : (
-                  'Submit to Role IQ'
-                )}
-              </Button>
-              
-              <Button 
-                variant="outline" 
-                onClick={handleDownloadResults}
-                className="flex-1"
-                disabled={userAssignments.length === 0}
-              >
-                Download Results
-              </Button>
-            </div>
-          </>
+          </div>
         )}
-      </div>
-    </div>
+      </CardContent>
+    </Card>
   );
 };
 

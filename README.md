@@ -1,73 +1,41 @@
-# Welcome to your Lovable project
+# Pluralsight User Management Tool
 
-## Project info
+A tool for managing Pluralsight users in bulk, including adding users to channels and Role IQ.
 
-**URL**: https://lovable.dev/projects/328b5079-0b78-4e49-9bf7-de5827816575
+## Features
 
-## How can I edit this code?
+- Bulk add users to channels
+- Bulk add users to Role IQ
+- CSV file upload support
+- Preview functionality
+- Demo mode for testing
 
-There are several ways of editing your application.
+## Getting Started
 
-**Use Lovable**
+1. Clone the repository
+2. Install dependencies:
+   ```bash
+   npm install
+   ```
+3. Start the development server:
+   ```bash
+   npm run dev
+   ```
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/328b5079-0b78-4e49-9bf7-de5827816575) and start prompting.
+## Usage
 
-Changes made via Lovable will be committed automatically to this repo.
+1. Prepare a CSV file with user IDs
+2. Enter the Channel ID or Role IQ ID
+3. Upload the CSV file
+4. Use the preview feature to check user status
+5. Submit to process the assignments
 
-**Use your preferred IDE**
+## Development
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+- Built with React and TypeScript
+- Uses Vite for build tooling
+- Styled with Tailwind CSS
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
+## License
 
-Follow these steps:
-
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
-
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
-
-# Step 3: Install the necessary dependencies.
-npm i
-
-# Step 4: Start the development server with auto-reloading and an instant preview.
-npm run dev
-```
-
-**Edit a file directly in GitHub**
-
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
-
-**Use GitHub Codespaces**
-
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
-
-## What technologies are used for this project?
-
-This project is built with:
-
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
-
-## How can I deploy this project?
-
-Simply open [Lovable](https://lovable.dev/projects/328b5079-0b78-4e49-9bf7-de5827816575) and click on Share -> Publish.
-
-## Can I connect a custom domain to my Lovable project?
-
-Yes, you can!
-
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
-
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/tips-tricks/custom-domain#step-by-step-guide)
+MIT
